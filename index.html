@@ -3,6 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="はなか受注">
+<meta name="theme-color" content="#87CEEB">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%2387CEEB'/><text x='50' y='75' font-size='60' text-anchor='middle'>🦁</text></svg>">
+<script>
+(function(){
+  var c=document.createElement('canvas');c.width=180;c.height=180;
+  var x=c.getContext('2d');
+  x.fillStyle='#87CEEB';x.beginPath();x.roundRect(0,0,180,180,40);x.fill();
+  x.font='120px serif';x.textAlign='center';x.textBaseline='middle';
+  x.fillText('\uD83E\uDD81',90,95);
+  var link=document.createElement('link');
+  link.rel='apple-touch-icon';link.href=c.toDataURL('image/png');
+  document.head.appendChild(link);
+})();
+</script>
 <title>受注管理ダッシュボード - リベシティ市場</title>
 <style>
 :root {
@@ -1093,9 +1110,13 @@ function sendShipNotify(orderNum) {
   }
 
   // UI入力値を取得
+  const carrier = document.getElementById('carrier_' + orderNum)?.value || 'クロネコヤマト';
   const tempType = document.getElementById('tempType_' + orderNum)?.value || '冷凍便';
   const delivDateVal = document.getElementById('delivDate_' + orderNum)?.value || '';
   const delivTimeVal = document.getElementById('delivTime_' + orderNum)?.value || '';
+
+  // 配送方法の表示テキスト
+  const carrierLine = `${carrier}　${tempType}`;
 
   // 配達日時のフォーマット
   let delivLine = '';
@@ -1111,7 +1132,7 @@ function sendShipNotify(orderNum) {
   }
 
   // テンプレート文面を生成
-  const msg = `本日出荷させていただきました。\nクロネコヤマト　${tempType}\nお問い合わせ番号：${wf.tracking}${delivLine}\nご到着までしばらくお待ちください。\n\nまた、お時間あるときにレビューを書いて頂けると、すごく励みになります\u263A\uFE0F\uD83D\uDE4F`;
+  const msg = `本日出荷させていただきました。\n${carrierLine}\nお問い合わせ番号\n${wf.tracking}${delivLine}\nご到着までしばらくお待ちください。\n\nまた、お時間あるときにレビューを書いて頂けると、すごく励みになります\u263A\uFE0F\uD83D\uDE4F`;
 
   // クリップボードにコピー
   const copyMsg = (text) => {
@@ -1277,6 +1298,13 @@ function renderOrders() {
 
           ${wf.tracking ? `<div class="ship-notify-section">
             <div class="notify-options">
+              <div class="notify-row">
+                <label>&#128666; 配送方法</label>
+                <select id="carrier_${esc(order.orderNumber)}" class="notify-select">
+                  <option value="クロネコヤマト">クロネコヤマト</option>
+                  <option value="ゆうパック">ゆうパック</option>
+                </select>
+              </div>
               <div class="notify-row">
                 <label>&#128663; 温度帯</label>
                 <select id="tempType_${esc(order.orderNumber)}" class="notify-select">
