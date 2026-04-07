@@ -1296,7 +1296,7 @@ function renderOrders() {
             ${wf.tracking ? `<button class="tracking-copy" onclick="copyText('${esc(wf.tracking)}', this)">&#128203;</button>` : ''}
           </div>
 
-          ${wf.tracking ? `<div class="ship-notify-section">
+          <div class="ship-notify-section">
             <div class="notify-options">
               <div class="notify-row">
                 <label>&#128666; 配送方法</label>
@@ -1326,10 +1326,10 @@ function renderOrders() {
                 </select>
               </div>
             </div>
-            <button class="ship-notify-btn" onclick="sendShipNotify('${esc(order.orderNumber)}')">
+            ${wf.tracking ? `<button class="ship-notify-btn" onclick="sendShipNotify('${esc(order.orderNumber)}')">
               &#128276; 発送完了通知を送る
-            </button>
-          </div>` : ''}
+            </button>` : '<p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px;">追跡番号を入力すると発送通知ボタンが表示されます</p>'}
+          </div>
 
           <div class="workflow-field" style="flex-direction:column;align-items:stretch;">
             <label>&#128221; 社内メモ</label>
