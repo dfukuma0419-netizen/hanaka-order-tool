@@ -1151,7 +1151,8 @@ function renderOrders() {
   const container = document.getElementById('orderCards');
   const search = document.getElementById('searchInput').value.toLowerCase();
 
-  let filtered = orders.filter(o => {
+  const activeOrders = orders.filter(o => o.status !== 'キャンセル');
+  let filtered = activeOrders.filter(o => {
     if (currentFilter !== 'all' && o.status !== currentFilter) return false;
     if (search) {
       const t = [o.orderNumber, o.buyerName, o.productName, o.recipientName, o.address, o.phone].join(' ').toLowerCase();
@@ -1160,8 +1161,8 @@ function renderOrders() {
     return true;
   });
 
-  const counts = { all: orders.length };
-  orders.forEach(o => { counts[o.status] = (counts[o.status] || 0) + 1; });
+  const counts = { all: activeOrders.length };
+  activeOrders.forEach(o => { counts[o.status] = (counts[o.status] || 0) + 1; });
   document.getElementById('countAll').textContent = counts.all;
   ['着金確認中', '発送準備中', '発送済み', '完了'].forEach(s => {
     const el = document.getElementById('count' + s);
@@ -1176,7 +1177,7 @@ function renderOrders() {
     return;
   }
 
-  document.getElementById('orderCount').textContent = `${filtered.length}件表示中（全${orders.length}件）`;
+  document.getElementById('orderCount').textContent = `${filtered.length}件表示中（全${activeOrders.length}件）`;
 
   container.innerHTML = filtered.map(order => {
     const wf = getWF(order.orderNumber);
