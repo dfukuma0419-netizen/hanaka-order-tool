@@ -1151,7 +1151,7 @@ function renderOrders() {
   const container = document.getElementById('orderCards');
   const search = document.getElementById('searchInput').value.toLowerCase();
 
-  const activeOrders = orders.filter(o => o.status !== 'キャンセル');
+  const activeOrders = orders.filter(o => !o.status.includes('キャンセル'));
   let filtered = activeOrders.filter(o => {
     if (currentFilter !== 'all' && o.status !== currentFilter) return false;
     if (search) {
