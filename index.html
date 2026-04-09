@@ -1124,26 +1124,17 @@ function sendShipNotify(orderNum) {
   const msg = `本日出荷させていただきました。\n${carrierLine}\nお問い合わせ番号\n${wf.tracking}${delivLine}\nご到着までしばらくお待ちください。\n\nまた、お時間あるときにレビューを書いて頂けると、すごく励みになります\u263A\uFE0F\uD83D\uDE4F`;
 
   // クリップボードにコピー
-  const copyMsg = (text) => {
-    navigator.clipboard.writeText(text).then(() => {
-      showToast('発送通知メッセージをコピーしました。リベシティの注文画面を開きます...');
-    }).catch(() => {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      showToast('発送通知メッセージをコピーしました。リベシティの注文画面を開きます...');
-    });
-  };
-  copyMsg(msg);
-
-  // リベシティ市場の注文詳細ページを開く
-  const url = `https://ichiba.libecity.com/seller/orders/${encodeURIComponent(orderNum)}`;
-  setTimeout(() => {
-    window.open(url, '_blank');
-  }, 800);
+  navigator.clipboard.writeText(msg).then(() => {
+    showToast('発送完了メッセージをコピーしました');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = msg;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('発送完了メッセージをコピーしました');
+  });
 }
 
 // ===== Render =====
@@ -1317,7 +1308,7 @@ function renderOrders() {
               </div>
             </div>
             ${wf.tracking ? `<button class="ship-notify-btn" onclick="sendShipNotify('${esc(order.orderNumber)}')">
-              &#128276; 発送完了通知を送る
+              &#128203; 発送完了メッセージをコピー
             </button>` : '<p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px;">追跡番号を入力すると発送通知ボタンが表示されます</p>'}
           </div>
 
