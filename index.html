@@ -244,6 +244,36 @@ body {
 .shipping-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 .shipping-info { display: grid; gap: 4px; margin-bottom: 8px; }
 .shipping-row { display: flex; align-items: baseline; gap: 6px; font-size: 14px; }
+.shipping-note {
+  display: flex; gap: 6px; font-size: 13px;
+  background: #fffbe6; border-left: 3px solid #e6c200;
+  padding: 6px 10px; border-radius: 4px; margin-top: 4px;
+}
+.shipping-note .shipping-label { flex-shrink: 0; font-weight: 600; color: #8a6d00; }
+.shipping-note-text { flex: 1; white-space: pre-wrap; word-break: break-all; line-height: 1.5; color: #4a3a00; }
+.sender-override {
+  margin-top: 10px; padding: 10px 12px;
+  background: #f8f9fb; border: 1px solid #e0e7ef; border-radius: 6px;
+}
+.sender-override-header {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: #374151;
+}
+.sender-override-hint { font-size: 11px; color: #6b7280; margin-bottom: 6px; }
+.sender-override-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sender-override-grid input {
+  width: 100%; padding: 6px 8px; font-size: 13px;
+  border: 1px solid #d1d5db; border-radius: 4px; box-sizing: border-box;
+}
+.sender-override-grid input:focus { border-color: var(--primary); outline: none; }
+.btn-parse-note {
+  font-size: 11px; padding: 3px 8px; border-radius: 4px;
+  border: 1px solid #d1d5db; background: white; cursor: pointer; color: #374151;
+}
+.btn-parse-note:hover { background: #f3f4f6; }
+@media (max-width: 640px) {
+  .sender-override-grid { grid-template-columns: 1fr; }
+}
 .shipping-label { color: var(--gray-500); font-size: 12px; min-width: 30px; }
 .shipping-value { flex: 1; word-break: break-all; }
 .copy-btn {
@@ -1149,6 +1179,63 @@ function updateMemo(orderNum, value) {
   pushWorkflowToCloud(orderNum);
 }
 
+// ===== 差出人情報の上書き =====
+function updateCustomSender(orderNum, field, value) {
+  const wf = getWF(orderNum);
+  if (!wf.customSender) wf.customSender = { name: '', postal: '', address: '', phone: '' };
+  wf.customSender[field] = (value || '').trim();
+  saveWorkflow();
+  pushWorkflowToCloud(orderNum);
+}
+
+// ギフト案件（注文主≠お届け先）判定
+function isGiftCase(order) {
+  const normalize = (s) => (s || '').replace(/\s+/g, '').replace(/(様|さん|御中)$/g, '');
+  const b = normalize(order.buyerName);
+  const r = normalize(order.recipientName);
+  return b && r && b !== r;
+}
+
+// 特記事項から郵便番号・電話番号を抽出して差出人情報に自動入力
+function parseFromNote(orderNum) {
+  const o = orders.find(x => x.orderNumber === orderNum);
+  if (!o || !o.note) { showToast('特記事項がありません'); return; }
+  const note = o.note;
+
+  // 郵便番号（7桁・ハイフンあり/なし、〒マーク付きも許容）
+  const postalMatch = note.match(/〒?\s*(\d{3})[-ー－\s]?(\d{4})/);
+  // 電話番号（10〜11桁、ハイフンあり/なし、先頭が0）
+  const phoneMatch = note.match(/(?:TEL[:：]?\s*|電話[:：]?\s*|☎\s*)?(?<![0-9])(0[0-9]{1,4}[-ー－\s]?[0-9]{1,4}[-ー－\s]?[0-9]{3,4})(?![0-9])/);
+
+  const wf = getWF(orderNum);
+  if (!wf.customSender) wf.customSender = { name: '', postal: '', address: '', phone: '' };
+
+  const found = [];
+  if (postalMatch && !wf.customSender.postal) {
+    wf.customSender.postal = postalMatch[1] + postalMatch[2];
+    found.push('郵便番号');
+  }
+  if (phoneMatch && !wf.customSender.phone) {
+    wf.customSender.phone = phoneMatch[1].replace(/[-ー－\s]/g, '');
+    found.push('電話番号');
+  }
+  // 差出人名：ギフトなら購入者名をプリセット
+  if (!wf.customSender.name && isGiftCase(o)) {
+    wf.customSender.name = (o.buyerName || '').replace(/\s*様\s*$/, '');
+    found.push('差出人名');
+  }
+
+  saveWorkflow();
+  pushWorkflowToCloud(orderNum);
+  renderOrders();
+
+  if (found.length > 0) {
+    showToast(`${found.join('・')}を取り込みました。住所はご確認のうえ手入力してください。`);
+  } else {
+    showToast('郵便番号・電話番号を検出できませんでした');
+  }
+}
+
 function updateTracking(orderNum, value) {
   getWF(orderNum).tracking = value;
   saveWorkflow();
@@ -1349,6 +1436,8 @@ function exportYamatoCSV() {
     const delivTimeVal = document.getElementById('delivTime_' + o.orderNumber)?.value || '';
     const delivDate = delivDateVal ? delivDateVal.replace(/-/g, '/') : '';
     const timeCode = timeMap[delivTimeVal] || '';
+    const wf = getWF(o.orderNumber);
+    const cs = wf.customSender || { name: '', postal: '', address: '', phone: '' };
 
     // 95列分の配列（テンプレ順）
     const row = new Array(95).fill('');
@@ -1370,20 +1459,25 @@ function exportYamatoCSV() {
     row[15] = (o.recipientName || '').replace(/\s*様\s*$/, '');            // お届け先名
     row[16] = '';                                                          // お届け先名(ｶﾅ)
     row[17] = '様';                                                        // 敬称
-    // ご依頼主名の決定：注文主 = お届け先の場合はお店名、違う場合は注文主（買い手）の名前
+    // ご依頼主情報の決定ロジック（優先順位）：
+    // 1. カードの「差出人情報」欄に個別入力がある場合 → それを優先使用
+    // 2. 注文主 ≠ お届け先（ギフト）の場合 → 名前のみ注文主、他はお店情報
+    // 3. 通常 → すべてお店情報
     const normalizeName = (s) => (s || '').replace(/\s+/g, '').replace(/(様|さん|御中)$/g, '');
-    const buyerNormalized = normalizeName(o.buyerName);
-    const recipientNormalized = normalizeName(o.recipientName);
-    const isGift = buyerNormalized && recipientNormalized && buyerNormalized !== recipientNormalized;
-    const requesterName = isGift ? (o.buyerName || '').replace(/\s*様\s*$/, '') : (senderInfo.name || '');
+    const isGift = normalizeName(o.buyerName) && normalizeName(o.recipientName) &&
+                   normalizeName(o.buyerName) !== normalizeName(o.recipientName);
+    const requesterName = cs.name || (isGift ? (o.buyerName || '').replace(/\s*様\s*$/, '') : (senderInfo.name || ''));
+    const requesterPhone  = (cs.phone   || senderInfo.phone   || '').replace(/[^0-9]/g, '');
+    const requesterPostal = (cs.postal  || senderInfo.postal  || '').replace(/[^0-9]/g, '');
+    const requesterAddr   = cs.address || senderInfo.address || '';
 
     row[18] = '';                                                          // ご依頼主コード
-    row[19] = senderInfo.phone || '';                                      // ご依頼主電話番号
+    row[19] = requesterPhone;                                              // ご依頼主電話番号
     row[20] = '';                                                          // ご依頼主電話番号枝番
-    row[21] = senderInfo.postal || '';                                     // ご依頼主郵便番号
-    row[22] = senderInfo.address || '';                                    // ご依頼主住所
+    row[21] = requesterPostal;                                             // ご依頼主郵便番号
+    row[22] = requesterAddr;                                               // ご依頼主住所
     row[23] = '';                                                          // ご依頼主アパートマンション
-    row[24] = requesterName;                                               // ご依頼主名（ギフト時は注文主名）
+    row[24] = requesterName;                                               // ご依頼主名
     row[25] = '';                                                          // ご依頼主名(ｶﾅ)
     row[26] = '';                                                          // 品名コード１
     row[27] = (o.productName || '').slice(0, 25);                          // 品名１
@@ -1472,7 +1566,7 @@ function renderOrders() {
     const badgeClass = 'badge-' + order.status;
     const shortNum = order.orderNumber.length > 16 ? '...' + order.orderNumber.slice(-10) : order.orderNumber;
     const progressDone = [wf.slip, wf.packed, wf.shipped].filter(Boolean).length;
-    const noteShort = order.note ? order.note.replace(/\n/g, ' ').substring(0, 60) : '';
+    const noteFull = order.note ? order.note.trim() : '';
 
     function staffSelect(field) {
       const val = wf[field + 'Staff'] || '';
@@ -1524,7 +1618,7 @@ function renderOrders() {
             ${shipRow('〒', addr.postal)}
             ${shipRow('住所', addr.addr)}
             ${shipRow('TEL', order.phone)}
-            ${noteShort ? shipRow('備考', noteShort) : ''}
+            ${noteFull ? `<div class="shipping-note"><span class="shipping-label">特記事項</span><div class="shipping-note-text">${esc(noteFull)}</div><button class="copy-btn" data-copy="${esc(noteFull)}" onclick="copyText(this.dataset.copy, this)">&#128203;</button></div>` : ''}
           </div>
           <div class="copy-actions">
             <button class="copy-bulk" onclick="copyShipping('${esc(order.orderNumber)}')">&#128666; ヤマト/ゆうパック用コピー</button>
@@ -1620,6 +1714,25 @@ function renderOrders() {
             <label>&#128221; 社内メモ</label>
             <textarea class="memo-input" placeholder="社内向けメモを入力..." rows="2"
               onchange="updateMemo('${esc(order.orderNumber)}', this.value)">${esc(wf.memo || '')}</textarea>
+          </div>
+
+          <!-- 差出人情報（伝票の依頼主欄の上書き、空欄ならお店情報を使用） -->
+          <div class="sender-override">
+            <div class="sender-override-header">
+              <span>&#128231; 差出人情報（伝票のご依頼主欄）</span>
+              ${noteFull ? `<button class="btn-parse-note" onclick="parseFromNote('${esc(order.orderNumber)}')" title="特記事項から郵便番号・電話番号を自動抽出">&#9889; 特記事項から取込</button>` : ''}
+            </div>
+            <div class="sender-override-hint">空欄ならお店の情報が使われます${isGiftCase(order) ? '｜<b>ギフト案件のため注文主名が自動で入ります</b>' : ''}</div>
+            <div class="sender-override-grid">
+              <input type="text" placeholder="差出人名（例：山田太郎）" value="${esc((wf.customSender && wf.customSender.name) || '')}"
+                onchange="updateCustomSender('${esc(order.orderNumber)}', 'name', this.value)">
+              <input type="text" placeholder="郵便番号（例：1234567）" value="${esc((wf.customSender && wf.customSender.postal) || '')}"
+                onchange="updateCustomSender('${esc(order.orderNumber)}', 'postal', this.value)">
+              <input type="text" placeholder="住所" value="${esc((wf.customSender && wf.customSender.address) || '')}"
+                onchange="updateCustomSender('${esc(order.orderNumber)}', 'address', this.value)">
+              <input type="text" placeholder="電話番号（例：0312345678）" value="${esc((wf.customSender && wf.customSender.phone) || '')}"
+                onchange="updateCustomSender('${esc(order.orderNumber)}', 'phone', this.value)">
+            </div>
           </div>
         </div>
 
