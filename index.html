@@ -500,6 +500,29 @@ body {
         <button onclick="addStaff()">追加</button>
       </div>
     </div>
+    <!-- Sender Info for Yamato B2 Cloud -->
+    <div class="settings-section">
+      <h3>&#128230; 発送元情報（ヤマトB2クラウド用）</h3>
+      <div style="display:grid;gap:8px;">
+        <div class="form-group">
+          <label>発送元名（ご依頼主名）</label>
+          <input type="text" id="senderName" placeholder="花と洋菓子のお店 はなか">
+        </div>
+        <div class="form-group">
+          <label>郵便番号（ハイフンなし）</label>
+          <input type="text" id="senderPostal" placeholder="1234567">
+        </div>
+        <div class="form-group">
+          <label>住所</label>
+          <input type="text" id="senderAddress" placeholder="東京都○○区○○1-2-3">
+        </div>
+        <div class="form-group">
+          <label>電話番号（ハイフンなし）</label>
+          <input type="text" id="senderPhone" placeholder="0312345678">
+        </div>
+        <button class="btn btn-primary" onclick="saveSenderSettings()">保存</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -519,7 +542,10 @@ body {
 
 <!-- Main -->
 <div class="main">
-  <div class="order-count" id="orderCount"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+    <div class="order-count" id="orderCount"></div>
+    <button class="btn btn-outline btn-sm" onclick="exportYamatoCSV()" title="発送準備中の注文をヤマトB2クラウド用CSVで出力">&#128666; ヤマトB2クラウドCSV出力</button>
+  </div>
   <div class="order-cards" id="orderCards">
     <div class="empty-state">
       <div class="icon">&#128230;</div>
@@ -613,14 +639,21 @@ async function init() {
   if (scriptUrl) loadWorkflowFromCloud();
 }
 
+let senderInfo = { name: '', postal: '', address: '', phone: '' };
+
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem('hanaka_settings') || '{}');
     sheetId = s.sheetId || '';
     scriptUrl = s.scriptUrl || 'https://script.google.com/macros/s/AKfycbxFpA7zcEqGr5BYNcNKKOFwE_X_P6q1TSuUTM-PxZxre2Wws3T5GJywTF2W0SKHgx5x/exec';
     staffMembers = (s.staffMembers && s.staffMembers.length > 0) ? s.staffMembers : ['金山', '三島', '岡', '田邊'];
+    senderInfo = s.senderInfo || { name: '', postal: '', address: '', phone: '' };
     document.getElementById('sheetUrl').value = s.sheetUrl || '';
     document.getElementById('scriptUrl').value = s.scriptUrl || scriptUrl;
+    document.getElementById('senderName').value = senderInfo.name || '';
+    document.getElementById('senderPostal').value = senderInfo.postal || '';
+    document.getElementById('senderAddress').value = senderInfo.address || '';
+    document.getElementById('senderPhone').value = senderInfo.phone || '';
   } catch(e) {}
   try {
     workflowData = JSON.parse(localStorage.getItem('hanaka_workflow') || '{}');
@@ -630,8 +663,19 @@ function loadSettings() {
 function saveSettings() {
   localStorage.setItem('hanaka_settings', JSON.stringify({
     sheetId, sheetUrl: document.getElementById('sheetUrl').value,
-    scriptUrl, staffMembers
+    scriptUrl, staffMembers, senderInfo
   }));
+}
+
+function saveSenderSettings() {
+  senderInfo = {
+    name: document.getElementById('senderName').value.trim(),
+    postal: document.getElementById('senderPostal').value.trim().replace(/-/g, ''),
+    address: document.getElementById('senderAddress').value.trim(),
+    phone: document.getElementById('senderPhone').value.trim().replace(/-/g, '')
+  };
+  saveSettings();
+  showToast('発送元情報を保存しました');
 }
 
 function saveWorkflow() {
@@ -1135,6 +1179,151 @@ function sendShipNotify(orderNum) {
     document.body.removeChild(ta);
     showToast('発送完了メッセージをコピーしました');
   });
+}
+
+// ===== Yamato B2 Cloud CSV Export =====
+function exportYamatoCSV() {
+  if (!senderInfo.name || !senderInfo.postal || !senderInfo.address || !senderInfo.phone) {
+    showToast('設定から発送元情報を入力してください');
+    toggleSettings();
+    return;
+  }
+
+  // 対象: 発送準備中 かつ 出荷未完了 かつ 配送方法がクロネコヤマト
+  const targets = orders.filter(o => {
+    if (o.status.includes('キャンセル')) return false;
+    if (o.status !== '発送準備中') return false;
+    const wf = getWF(o.orderNumber);
+    if (wf.shipped) return false;
+    const carrier = document.getElementById('carrier_' + o.orderNumber)?.value || 'クロネコヤマト';
+    return carrier === 'クロネコヤマト';
+  });
+
+  if (targets.length === 0) {
+    showToast('出力対象の注文がありません（発送準備中・ヤマト選択・未発送）');
+    return;
+  }
+
+  // B2クラウド CSV ヘッダー（主要89項目）
+  const headers = [
+    'お客様管理番号','送り状種類','クール区分','伝票番号','出荷予定日','お届け予定日','配達時間帯',
+    'お届け先コード','お届け先電話番号','お届け先電話番号枝番','お届け先郵便番号','お届け先住所',
+    'お届け先アパートマンション名','お届け先会社・部門1','お届け先会社・部門2','お届け先名','お届け先名(カナ)','敬称',
+    'ご依頼主コード','ご依頼主電話番号','ご依頼主電話番号枝番','ご依頼主郵便番号','ご依頼主住所',
+    'ご依頼主アパートマンション','ご依頼主名','ご依頼主名(カナ)',
+    '品名コード1','品名1','品名コード2','品名2','荷扱い1','荷扱い2','記事',
+    'コレクト代金引換金額（税込）','内消費税額等','止置き','営業所コード',
+    '発行枚数','個数口表示フラグ','ポータルお客様管理番号','予備','送り状データ連携先コード','送り状データ連携先枝番',
+    '請求先顧客コード','請求先分類コード','運賃管理番号',
+    '原産国コード','輸出入区分','海外着払い地帯コード','通貨種別','保険金額','小口分散','ポータル送り状番号'
+  ];
+
+  // 時間帯コード変換
+  const timeMap = {
+    '': '',
+    '午前中': '0812',
+    '14時〜16時': '1416',
+    '16時〜18時': '1618',
+    '18時〜20時': '1820',
+    '19時〜21時': '1921'
+  };
+
+  // クール区分
+  const coolMap = { '常温便': '0', '冷蔵便': '1', '冷凍便': '2' };
+
+  // 今日の日付 YYYY/MM/DD
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}/${String(today.getMonth()+1).padStart(2,'0')}/${String(today.getDate()).padStart(2,'0')}`;
+
+  const rows = targets.map(o => {
+    const addr = parseAddress(o.address);
+    const tempType = document.getElementById('tempType_' + o.orderNumber)?.value || '冷凍便';
+    const delivDateVal = document.getElementById('delivDate_' + o.orderNumber)?.value || '';
+    const delivTimeVal = document.getElementById('delivTime_' + o.orderNumber)?.value || '';
+    const delivDate = delivDateVal ? delivDateVal.replace(/-/g, '/') : '';
+    const timeCode = timeMap[delivTimeVal] || '';
+
+    const row = {
+      'お客様管理番号': o.orderNumber.slice(-20),
+      '送り状種類': '0',
+      'クール区分': coolMap[tempType] || '2',
+      '伝票番号': '',
+      '出荷予定日': todayStr,
+      'お届け予定日': delivDate,
+      '配達時間帯': timeCode,
+      'お届け先コード': '',
+      'お届け先電話番号': (o.phone || '').replace(/-/g, ''),
+      'お届け先電話番号枝番': '',
+      'お届け先郵便番号': addr.postal.replace(/-/g, ''),
+      'お届け先住所': addr.addr,
+      'お届け先アパートマンション名': '',
+      'お届け先会社・部門1': '',
+      'お届け先会社・部門2': '',
+      'お届け先名': (o.recipientName || '').replace(/\s*様\s*$/, ''),
+      'お届け先名(カナ)': '',
+      '敬称': '様',
+      'ご依頼主コード': '',
+      'ご依頼主電話番号': senderInfo.phone,
+      'ご依頼主電話番号枝番': '',
+      'ご依頼主郵便番号': senderInfo.postal,
+      'ご依頼主住所': senderInfo.address,
+      'ご依頼主アパートマンション': '',
+      'ご依頼主名': senderInfo.name,
+      'ご依頼主名(カナ)': '',
+      '品名コード1': '',
+      '品名1': (o.productName || '').slice(0, 25),
+      '品名コード2': '',
+      '品名2': '',
+      '荷扱い1': '',
+      '荷扱い2': '',
+      '記事': '',
+      'コレクト代金引換金額（税込）': '',
+      '内消費税額等': '',
+      '止置き': '0',
+      '営業所コード': '',
+      '発行枚数': '1',
+      '個数口表示フラグ': '1',
+      'ポータルお客様管理番号': '',
+      '予備': '',
+      '送り状データ連携先コード': '',
+      '送り状データ連携先枝番': '',
+      '請求先顧客コード': '',
+      '請求先分類コード': '',
+      '運賃管理番号': '01',
+      '原産国コード': '',
+      '輸出入区分': '',
+      '海外着払い地帯コード': '',
+      '通貨種別': '',
+      '保険金額': '',
+      '小口分散': '',
+      'ポータル送り状番号': ''
+    };
+    return headers.map(h => {
+      const v = row[h] || '';
+      // CSVエスケープ
+      if (/[",\n]/.test(v)) return '"' + v.replace(/"/g, '""') + '"';
+      return v;
+    }).join(',');
+  });
+
+  const csv = [headers.join(','), ...rows].join('\r\n');
+
+  // Shift_JISでダウンロード（B2クラウド互換）
+  const encoder = new TextEncoder();
+  // BOM付きUTF-8で出力（B2クラウドもこれで読める環境が多い）
+  const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+  const csvBytes = encoder.encode(csv);
+  const blob = new Blob([bom, csvBytes], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const ts = todayStr.replace(/\//g, '');
+  a.download = `yamato_b2_${ts}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`${targets.length}件をCSV出力しました`);
 }
 
 // ===== Render =====
