@@ -546,29 +546,6 @@ body {
         <button onclick="addStaff()">追加</button>
       </div>
     </div>
-    <!-- Sender Info for Yamato B2 Cloud -->
-    <div class="settings-section">
-      <h3>&#128230; 発送元情報（ヤマトB2クラウド用）</h3>
-      <div style="display:grid;gap:8px;">
-        <div class="form-group">
-          <label>発送元名（ご依頼主名）</label>
-          <input type="text" id="senderName" placeholder="花と洋菓子のお店 はなか">
-        </div>
-        <div class="form-group">
-          <label>郵便番号（ハイフンなし）</label>
-          <input type="text" id="senderPostal" placeholder="1234567">
-        </div>
-        <div class="form-group">
-          <label>住所</label>
-          <input type="text" id="senderAddress" placeholder="東京都○○区○○1-2-3">
-        </div>
-        <div class="form-group">
-          <label>電話番号（ハイフンなし）</label>
-          <input type="text" id="senderPhone" placeholder="0312345678">
-        </div>
-        <button class="btn btn-primary" onclick="saveSenderSettings()">保存</button>
-      </div>
-    </div>
   </div>
 </div>
 
@@ -692,21 +669,14 @@ async function init() {
   if (scriptUrl) loadWorkflowFromCloud();
 }
 
-let senderInfo = { name: '', postal: '', address: '', phone: '' };
-
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem('hanaka_settings') || '{}');
     sheetId = s.sheetId || '';
     scriptUrl = s.scriptUrl || 'https://script.google.com/macros/s/AKfycbxFpA7zcEqGr5BYNcNKKOFwE_X_P6q1TSuUTM-PxZxre2Wws3T5GJywTF2W0SKHgx5x/exec';
     staffMembers = (s.staffMembers && s.staffMembers.length > 0) ? s.staffMembers : ['金山', '三島', '岡', '田邊'];
-    senderInfo = s.senderInfo || { name: '', postal: '', address: '', phone: '' };
     document.getElementById('sheetUrl').value = s.sheetUrl || '';
     document.getElementById('scriptUrl').value = s.scriptUrl || scriptUrl;
-    document.getElementById('senderName').value = senderInfo.name || '';
-    document.getElementById('senderPostal').value = senderInfo.postal || '';
-    document.getElementById('senderAddress').value = senderInfo.address || '';
-    document.getElementById('senderPhone').value = senderInfo.phone || '';
   } catch(e) {}
   try {
     workflowData = JSON.parse(localStorage.getItem('hanaka_workflow') || '{}');
@@ -716,19 +686,8 @@ function loadSettings() {
 function saveSettings() {
   localStorage.setItem('hanaka_settings', JSON.stringify({
     sheetId, sheetUrl: document.getElementById('sheetUrl').value,
-    scriptUrl, staffMembers, senderInfo
+    scriptUrl, staffMembers
   }));
-}
-
-function saveSenderSettings() {
-  senderInfo = {
-    name: document.getElementById('senderName').value.trim(),
-    postal: document.getElementById('senderPostal').value.trim().replace(/-/g, ''),
-    address: document.getElementById('senderAddress').value.trim(),
-    phone: document.getElementById('senderPhone').value.trim().replace(/-/g, '')
-  };
-  saveSettings();
-  showToast('発送元情報を保存しました');
 }
 
 function saveWorkflow() {
@@ -1344,12 +1303,6 @@ function clearCsvSelection() {
 
 // ===== Yamato B2 Cloud CSV Export =====
 function exportYamatoCSV() {
-  if (!senderInfo.name || !senderInfo.postal || !senderInfo.address || !senderInfo.phone) {
-    showToast('設定から発送元情報を入力してください');
-    toggleSettings();
-    return;
-  }
-
   if (selectedCsv.size === 0) {
     showToast('CSV出力する注文を選択してください（カード左上の「CSV」にチェック）');
     return;
@@ -1461,15 +1414,17 @@ function exportYamatoCSV() {
     row[17] = '様';                                                        // 敬称
     // ご依頼主情報の決定ロジック（優先順位）：
     // 1. カードの「差出人情報」欄に個別入力がある場合 → それを優先使用
-    // 2. 注文主 ≠ お届け先（ギフト）の場合 → 名前のみ注文主、他はお店情報
-    // 3. 通常 → すべてお店情報
+    // 2. 注文主 ≠ お届け先（ギフト）の場合 → 名前のみ注文主、住所・電話はお届け先と同じ
+    // 3. 通常 → すべてお届け先と同じ（デフォルト）
+    const recipientNameClean = (o.recipientName || '').replace(/\s*様\s*$/, '');
     const normalizeName = (s) => (s || '').replace(/\s+/g, '').replace(/(様|さん|御中)$/g, '');
     const isGift = normalizeName(o.buyerName) && normalizeName(o.recipientName) &&
                    normalizeName(o.buyerName) !== normalizeName(o.recipientName);
-    const requesterName = cs.name || (isGift ? (o.buyerName || '').replace(/\s*様\s*$/, '') : (senderInfo.name || ''));
-    const requesterPhone  = (cs.phone   || senderInfo.phone   || '').replace(/[^0-9]/g, '');
-    const requesterPostal = (cs.postal  || senderInfo.postal  || '').replace(/[^0-9]/g, '');
-    const requesterAddr   = cs.address || senderInfo.address || '';
+    const defaultRequesterName = isGift ? (o.buyerName || '').replace(/\s*様\s*$/, '') : recipientNameClean;
+    const requesterName   = cs.name    || defaultRequesterName;
+    const requesterPhone  = (cs.phone  || o.phone || '').replace(/[^0-9]/g, '');
+    const requesterPostal = (cs.postal || addr.postal || '').replace(/[^0-9]/g, '');
+    const requesterAddr   = cs.address || addr.addr || '';
 
     row[18] = '';                                                          // ご依頼主コード
     row[19] = requesterPhone;                                              // ご依頼主電話番号
@@ -1722,7 +1677,7 @@ function renderOrders() {
               <span>&#128231; 差出人情報（伝票のご依頼主欄）</span>
               ${noteFull ? `<button class="btn-parse-note" onclick="parseFromNote('${esc(order.orderNumber)}')" title="特記事項から郵便番号・電話番号を自動抽出">&#9889; 特記事項から取込</button>` : ''}
             </div>
-            <div class="sender-override-hint">空欄ならお店の情報が使われます${isGiftCase(order) ? '｜<b>ギフト案件のため注文主名が自動で入ります</b>' : ''}</div>
+            <div class="sender-override-hint">空欄ならお届け先と同じ情報が使われます${isGiftCase(order) ? '｜<b>ギフト案件のため名前は注文主名が自動で入ります</b>' : ''}</div>
             <div class="sender-override-grid">
               <input type="text" placeholder="差出人名（例：山田太郎）" value="${esc((wf.customSender && wf.customSender.name) || '')}"
                 onchange="updateCustomSender('${esc(order.orderNumber)}', 'name', this.value)">
