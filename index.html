@@ -1178,11 +1178,6 @@ function parseFromNote(orderNum) {
     wf.customSender.phone = phoneMatch[1].replace(/[-ー－\s]/g, '');
     found.push('電話番号');
   }
-  // 差出人名：ギフトなら購入者名をプリセット
-  if (!wf.customSender.name && isGiftCase(o)) {
-    wf.customSender.name = (o.buyerName || '').replace(/\s*様\s*$/, '');
-    found.push('差出人名');
-  }
 
   saveWorkflow();
   pushWorkflowToCloud(orderNum);
@@ -1414,14 +1409,9 @@ function exportYamatoCSV() {
     row[17] = '様';                                                        // 敬称
     // ご依頼主情報の決定ロジック（優先順位）：
     // 1. カードの「差出人情報」欄に個別入力がある場合 → それを優先使用
-    // 2. 注文主 ≠ お届け先（ギフト）の場合 → 名前のみ注文主、住所・電話はお届け先と同じ
-    // 3. 通常 → すべてお届け先と同じ（デフォルト）
+    // 2. デフォルト → すべてお届け先と同じ（名前・郵便番号・住所・電話）
     const recipientNameClean = (o.recipientName || '').replace(/\s*様\s*$/, '');
-    const normalizeName = (s) => (s || '').replace(/\s+/g, '').replace(/(様|さん|御中)$/g, '');
-    const isGift = normalizeName(o.buyerName) && normalizeName(o.recipientName) &&
-                   normalizeName(o.buyerName) !== normalizeName(o.recipientName);
-    const defaultRequesterName = isGift ? (o.buyerName || '').replace(/\s*様\s*$/, '') : recipientNameClean;
-    const requesterName   = cs.name    || defaultRequesterName;
+    const requesterName   = cs.name    || recipientNameClean;
     const requesterPhone  = (cs.phone  || o.phone || '').replace(/[^0-9]/g, '');
     const requesterPostal = (cs.postal || addr.postal || '').replace(/[^0-9]/g, '');
     const requesterAddr   = cs.address || addr.addr || '';
@@ -1677,7 +1667,7 @@ function renderOrders() {
               <span>&#128231; 差出人情報（伝票のご依頼主欄）</span>
               ${noteFull ? `<button class="btn-parse-note" onclick="parseFromNote('${esc(order.orderNumber)}')" title="特記事項から郵便番号・電話番号を自動抽出">&#9889; 特記事項から取込</button>` : ''}
             </div>
-            <div class="sender-override-hint">空欄ならお届け先と同じ情報が使われます${isGiftCase(order) ? '｜<b>ギフト案件のため名前は注文主名が自動で入ります</b>' : ''}</div>
+            <div class="sender-override-hint">空欄ならお届け先と同じ情報が使われます${isGiftCase(order) ? '｜<span style="color:#c62828;"><b>⚠ ギフト案件（注文主≠お届け先）</b></span>' : ''}</div>
             <div class="sender-override-grid">
               <input type="text" placeholder="差出人名（例：山田太郎）" value="${esc((wf.customSender && wf.customSender.name) || '')}"
                 onchange="updateCustomSender('${esc(order.orderNumber)}', 'name', this.value)">
