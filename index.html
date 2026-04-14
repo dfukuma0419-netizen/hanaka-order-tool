@@ -191,6 +191,22 @@ body {
 .order-card {
   background: white; border-radius: var(--radius);
   box-shadow: var(--shadow); margin-bottom: 12px; overflow: hidden;
+  transition: box-shadow .15s, border .15s;
+  border: 2px solid transparent;
+}
+.order-card.csv-selected {
+  border-color: #1e88e5;
+  box-shadow: 0 0 0 2px rgba(30,136,229,0.15), var(--shadow);
+}
+.csv-select-label {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #e3f2fd; color: #1565c0;
+  padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  user-select: none;
+}
+.csv-select-label input[type=checkbox] {
+  width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: #1e88e5;
 }
 .order-header {
   padding: 12px 16px; border-bottom: 1px solid var(--gray-100);
@@ -544,7 +560,12 @@ body {
 <div class="main">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
     <div class="order-count" id="orderCount"></div>
-    <button class="btn btn-outline btn-sm" onclick="exportYamatoCSV()" title="発送準備中の注文をヤマトB2クラウド用CSVで出力">&#128666; ヤマトB2クラウドCSV出力</button>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <span id="csvSelectCount" style="font-size:12px;color:var(--gray-600);"></span>
+      <button class="btn btn-outline btn-sm" onclick="selectAllVisibleForCsv()" title="表示中の発送準備中（ヤマト）注文をすべて選択">&#9745; 全選択</button>
+      <button class="btn btn-outline btn-sm" onclick="clearCsvSelection()" title="CSV選択を全解除">&#9744; 解除</button>
+      <button class="btn btn-outline btn-sm" onclick="exportYamatoCSV()" title="選択した注文をヤマトB2クラウド用CSVで出力">&#128666; ヤマトB2クラウドCSV出力</button>
+    </div>
   </div>
   <div class="order-cards" id="orderCards">
     <div class="empty-state">
@@ -596,6 +617,8 @@ let staffMembers = [];
 let workflowData = {};
 let autoRefreshInterval = null;
 let syncTimer = null;
+// CSV出力用に選択された注文番号
+let selectedCsv = new Set();
 
 // リベシティCSV列定義
 const COL = {
@@ -1181,6 +1204,57 @@ function sendShipNotify(orderNum) {
   });
 }
 
+// ===== CSV selection helpers =====
+function toggleCsvSelect(orderNum) {
+  if (selectedCsv.has(orderNum)) selectedCsv.delete(orderNum);
+  else selectedCsv.add(orderNum);
+  updateCsvSelectUI(orderNum);
+  updateCsvSelectCount();
+}
+function updateCsvSelectUI(orderNum) {
+  // カードの見た目だけ更新（再描画を避ける）
+  document.querySelectorAll('.order-card').forEach(card => {
+    const cb = card.querySelector('.csv-select-label input[type=checkbox]');
+    if (!cb) return;
+    const onclickAttr = cb.getAttribute('onclick') || '';
+    if (onclickAttr.includes(`'${orderNum}'`)) {
+      const sel = selectedCsv.has(orderNum);
+      cb.checked = sel;
+      card.classList.toggle('csv-selected', sel);
+    }
+  });
+}
+function updateCsvSelectCount() {
+  const el = document.getElementById('csvSelectCount');
+  if (!el) return;
+  el.textContent = selectedCsv.size > 0 ? `${selectedCsv.size}件選択中` : '';
+}
+function selectAllVisibleForCsv() {
+  // 現在DOMに描画されているカードの中から発送準備中＋未発送を全選択
+  let added = 0;
+  document.querySelectorAll('.order-card').forEach(card => {
+    const cb = card.querySelector('.csv-select-label input[type=checkbox]');
+    if (!cb) return;
+    const m = (cb.getAttribute('onclick') || '').match(/'([^']+)'/);
+    if (!m) return;
+    const num = m[1];
+    if (!selectedCsv.has(num)) { selectedCsv.add(num); added++; }
+    cb.checked = true;
+    card.classList.add('csv-selected');
+  });
+  updateCsvSelectCount();
+  showToast(added > 0 ? `${added}件を選択に追加しました` : '追加する注文はありません');
+}
+function clearCsvSelection() {
+  selectedCsv.clear();
+  document.querySelectorAll('.order-card').forEach(card => {
+    const cb = card.querySelector('.csv-select-label input[type=checkbox]');
+    if (cb) cb.checked = false;
+    card.classList.remove('csv-selected');
+  });
+  updateCsvSelectCount();
+}
+
 // ===== Yamato B2 Cloud CSV Export =====
 function exportYamatoCSV() {
   if (!senderInfo.name || !senderInfo.postal || !senderInfo.address || !senderInfo.phone) {
@@ -1189,19 +1263,30 @@ function exportYamatoCSV() {
     return;
   }
 
-  // 対象: 発送準備中 かつ 出荷未完了 かつ 配送方法がクロネコヤマト
+  if (selectedCsv.size === 0) {
+    showToast('CSV出力する注文を選択してください（カード左上の「CSV」にチェック）');
+    return;
+  }
+
+  // 対象: 選択された注文のうち 発送準備中 かつ 未発送 かつ 配送方法がクロネコヤマト
+  const skipped = [];
   const targets = orders.filter(o => {
-    if (o.status.includes('キャンセル')) return false;
-    if (o.status !== '発送準備中') return false;
+    if (!selectedCsv.has(o.orderNumber)) return false;
+    if (o.status.includes('キャンセル')) { skipped.push(`${o.orderNumber}（キャンセル）`); return false; }
+    if (o.status !== '発送準備中') { skipped.push(`${o.orderNumber}（${o.status}）`); return false; }
     const wf = getWF(o.orderNumber);
-    if (wf.shipped) return false;
+    if (wf.shipped) { skipped.push(`${o.orderNumber}（発送済み）`); return false; }
     const carrier = document.getElementById('carrier_' + o.orderNumber)?.value || 'クロネコヤマト';
-    return carrier === 'クロネコヤマト';
+    if (carrier !== 'クロネコヤマト') { skipped.push(`${o.orderNumber}（${carrier}）`); return false; }
+    return true;
   });
 
   if (targets.length === 0) {
-    showToast('出力対象の注文がありません（発送準備中・ヤマト選択・未発送）');
+    showToast('選択した注文に出力対象がありません');
     return;
+  }
+  if (skipped.length > 0) {
+    console.warn('CSV出力でスキップされた注文:', skipped);
   }
 
   // B2クラウド CSV ヘッダー（主要89項目）
@@ -1323,7 +1408,8 @@ function exportYamatoCSV() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast(`${targets.length}件をCSV出力しました`);
+  const skipMsg = skipped.length > 0 ? `（${skipped.length}件スキップ）` : '';
+  showToast(`${targets.length}件をCSV出力しました${skipMsg}`);
 }
 
 // ===== Render =====
@@ -1332,6 +1418,16 @@ function renderOrders() {
   const search = document.getElementById('searchInput').value.toLowerCase();
 
   const activeOrders = orders.filter(o => !o.status.includes('キャンセル'));
+
+  // 選択済みのうち、発送準備中でないor発送済みになった注文は選択から除去
+  if (selectedCsv.size > 0) {
+    const stillEligible = new Set(
+      activeOrders.filter(o => o.status === '発送準備中' && !getWF(o.orderNumber).shipped).map(o => o.orderNumber)
+    );
+    for (const num of Array.from(selectedCsv)) {
+      if (!stillEligible.has(num)) selectedCsv.delete(num);
+    }
+  }
   let filtered = activeOrders.filter(o => {
     if (currentFilter !== 'all' && o.status !== currentFilter) return false;
     if (search) {
@@ -1381,10 +1477,18 @@ function renderOrders() {
       </div>`;
     }
 
+    // CSV選択対象：発送準備中かつ未発送
+    const csvEligible = order.status === '発送準備中' && !wf.shipped;
+    const isSelected = selectedCsv.has(order.orderNumber);
+
     return `
-    <div class="order-card">
+    <div class="order-card${isSelected ? ' csv-selected' : ''}">
       <div class="order-header">
         <div class="order-meta">
+          ${csvEligible ? `<label class="csv-select-label" title="ヤマトCSV出力対象に選択" onclick="event.stopPropagation();">
+            <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="toggleCsvSelect('${esc(order.orderNumber)}')">
+            <span>CSV</span>
+          </label>` : ''}
           <span class="badge ${badgeClass}">${esc(order.status)}</span>
           <span class="order-date">${esc(order.orderDate)}</span>
           <span class="order-number">${esc(shortNum)}</span>
@@ -1511,6 +1615,8 @@ function renderOrders() {
       </div>
     </div>`;
   }).join('');
+
+  updateCsvSelectCount();
 }
 
 function shipRow(label, value) {
