@@ -1370,13 +1370,20 @@ function exportYamatoCSV() {
     row[15] = (o.recipientName || '').replace(/\s*様\s*$/, '');            // お届け先名
     row[16] = '';                                                          // お届け先名(ｶﾅ)
     row[17] = '様';                                                        // 敬称
+    // ご依頼主名の決定：注文主 = お届け先の場合はお店名、違う場合は注文主（買い手）の名前
+    const normalizeName = (s) => (s || '').replace(/\s+/g, '').replace(/(様|さん|御中)$/g, '');
+    const buyerNormalized = normalizeName(o.buyerName);
+    const recipientNormalized = normalizeName(o.recipientName);
+    const isGift = buyerNormalized && recipientNormalized && buyerNormalized !== recipientNormalized;
+    const requesterName = isGift ? (o.buyerName || '').replace(/\s*様\s*$/, '') : (senderInfo.name || '');
+
     row[18] = '';                                                          // ご依頼主コード
     row[19] = senderInfo.phone || '';                                      // ご依頼主電話番号
     row[20] = '';                                                          // ご依頼主電話番号枝番
     row[21] = senderInfo.postal || '';                                     // ご依頼主郵便番号
     row[22] = senderInfo.address || '';                                    // ご依頼主住所
     row[23] = '';                                                          // ご依頼主アパートマンション
-    row[24] = senderInfo.name || '';                                       // ご依頼主名
+    row[24] = requesterName;                                               // ご依頼主名（ギフト時は注文主名）
     row[25] = '';                                                          // ご依頼主名(ｶﾅ)
     row[26] = '';                                                          // 品名コード１
     row[27] = (o.productName || '').slice(0, 25);                          // 品名１
